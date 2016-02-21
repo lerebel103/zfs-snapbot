@@ -11,6 +11,8 @@ import sys
 from syslog import syslog
 from datetime import datetime, timedelta
 
+ZFS_COMMAND = '/usr/local/bin/zfs'
+
 DATE_FORMAT = '%Y-%m-%d_%H:%M'
 
 SNAP_PREFIX = 'snap-'
@@ -69,7 +71,7 @@ def do_section(section, config, now):
 def snapshot(config, section, suffix, now):
     # List existing snapshots
     snapshots = list()
-    cmd = 'zfs list -r -t snapshot {}'.format(section)
+    cmd = ZFS_COMMAND + ' list -r -t snapshot {}'.format(section)
     (stdoutdata, stderrdata) = exec_cmd(cmd)
     for line in stdoutdata.splitlines(False)[1:]:
         snapshots.append(line.split()[0])
@@ -100,7 +102,7 @@ def _create_snapsthot(path, prefix, suffix, snapshots):
     if snapshot_name not in snapshots:
 
         # Here's our new snapshot
-        cmd = 'zfs snapshot -r {}'.format(snapshot_name)
+        cmd = ZFS_COMMAND + ' snapshot -r {}'.format(snapshot_name)
         exec_cmd(cmd)
         snapshots.append(snapshot_name)
         print 'Created snapshot ' + snapshot_name
@@ -137,7 +139,7 @@ def _trim_snapshots(snapshots, max_count, prefix):
     old_snaps = list(s for s in snapshots if prefix in s)
     old_snaps = old_snaps[max_count:]
     for snap in old_snaps:
-        exec_cmd('zfs destroy {}'.format(snap))
+        exec_cmd(ZFS_COMMAND + ' destroy {}'.format(snap))
 
 
 def exec_cmd(cmd):
