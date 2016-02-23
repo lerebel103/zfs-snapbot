@@ -8,10 +8,14 @@ import subprocess
 import argparse
 import ConfigParser
 import sys
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from syslog import syslog
 from datetime import datetime, timedelta
 
 ZFS_COMMAND = '/usr/local/bin/zfs'
+ZPOOL_COMMAND = '/usr/local/bin/zpool'
 
 DATE_FORMAT = '%Y-%m-%d_%H:%M'
 
@@ -44,8 +48,51 @@ def main():
 
     # Check when last snapshot was made, create new one if interval exceeded
     now = datetime.now()
+    bad_pools = set()
     for section in config.sections():
-        do_section(section.strip(), config, now)
+        section = section.strip();
+        if len(section):
+            # Check pool first
+            pool = section.split('/')[0]
+            (stdoutdata, stderrdata) = exec_cmd(ZPOOL_COMMAND + ' status ' + pool)
+            if 'ONLINE' in stdoutdata:
+                do_section(section.strip(), config, now)
+            else:
+                # Uh something bad
+                bad_pools.add(pool)
+
+    #alert(config, bad_pools)
+
+def alert(config, bad_pools):
+    print "Bad pools: " + str(bad_pools)
+    s = smtplib.SMTP_SSL(
+        _get_config_value(config, ' ', 'smtp_host', None),
+        _get_config_value_int(config, ' ', 'smtp_port', 587),
+    )
+    #s.ehlo()
+    #s.starttls()
+    #s.ehlo()
+    s.login(
+        user = _get_config_value(config, ' ', 'smtp_user', None),
+        password = _get_config_value(config, ' ', 'smtp_password', None),
+    )
+
+
+    from_email = _get_config_value(config, ' ', 'smtp_from', None)
+    to_email = _get_config_value(config, ' ', 'smtp_to', None)
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = "Alert"
+    msg['From'] = from_email
+    msg['To'] = to_email
+
+    html = '<html><body><p>Hi, I have the following alerts for you!</p></body></html>'
+    part2 = MIMEText(html, 'html')
+
+    msg.attach(part2)
+
+    s.sendmail(from_email, to_email, msg.as_string())
+    s.quit()
 
 def _get_config_value(config, section, key, default):
     if config.has_option(section, key):
@@ -59,7 +106,6 @@ def _get_config_value_int(config, section, key, default):
 def do_section(section, config, now):
     interval = _get_config_value_int(config, section, 'snap_interval', DEFAULT_interval)
     if now.minute % interval == 0:
-
         # Create new snapshots
         suffix = now.strftime(DATE_FORMAT)
         (new_created, snapshots) = snapshot(config, section, suffix, now)
@@ -152,7 +198,7 @@ def exec_cmd(cmd):
     (stdoutdata, stderrdata) = p.communicate()
     if  p.returncode != 0:
         msg = stderrdata
-        err = 'ZFS list snapshot error:\n{}'.format(msg)
+        err = 'Command error:\n{}'.format(msg)
         print err
         syslog(err)
         raise subprocess.CalledProcessError(p.returncode, cmd, msg)
