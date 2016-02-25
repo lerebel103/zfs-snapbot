@@ -69,17 +69,17 @@ def main():
 def _can_send_alert(now, pools, check_file):
     """ Touch a file in temp filesystem, so we know alert has been sent.
     Clean up each day """
-    is_sent = os.path.isfile(check_file)
+    can_send = len(pools) > 0
 
-    if len(pools) == 0 and is_sent:
+    if len(pools) == 0 and os.path.isfile(check_file):
         os.remove(check_file)
-    elif is_sent:
+    else:
         pass
         #is_sent = False
         #with open(check_file, 'r') as f:
         #    for line in f:
 
-    return not is_sent
+    return can_send
 
 def _alert(now, config, bad_pools):
     tmp_dir = tempfile.gettempdir()
@@ -138,18 +138,19 @@ def _get_config_value_int(config, section, key, default):
     return int(_get_config_value(config, section, key, default))
 
 def do_section(section, config, now):
-    interval = _get_config_value_int(config, section, 'snap_interval', DEFAULT_interval)
-    minutes = int((now - datetime(1970, 1, 1)).total_seconds() / 60)
-    if minutes % interval == 0:
-        # Create new snapshots
-        suffix = now.strftime(DATE_FORMAT)
-        (new_created, snapshots) = snapshot(config, section, suffix, now)
+    # Create new snapshots
+    suffix = now.strftime(DATE_FORMAT)
+    (new_created, snapshots) = snapshot(config, section, suffix, now)
 
-        # Great now trim
-        if new_created:
-            _trim_all_snapshots(config, section, snapshots)
+    # Great now trim
+    if new_created:
+        _trim_all_snapshots(config, section, snapshots)
 
 def snapshot(config, section, suffix, now):
+    # Desired snapshot interval
+    interval = _get_config_value_int(
+        config, section, 'snap_interval', DEFAULT_interval)
+
     # List existing snapshots
     snapshots = list()
     cmd = ZFS_COMMAND + ' list -r -t snapshot {}'.format(section)
@@ -157,21 +158,30 @@ def snapshot(config, section, suffix, now):
     for line in stdoutdata.splitlines(False)[1:]:
         snapshots.append(line.split()[0])
 
-    # Regular snap
-    new_created = _create_snapsthot(section, SNAP_PREFIX, suffix, snapshots)
+    # Old snaps, retrieve last on record
+    matching = [s for s in snapshots if SNAP_PREFIX in s]
+    matching.sort(reverse=True)
+    last_date = now - timedelta(minutes=interval+1)
+    if matching:
+        datestr = matching[0].replace('{}@{}'.format(section, SNAP_PREFIX), '')
+        last_date = datetime.strptime(datestr, DATE_FORMAT)
 
-    interval = _get_config_value_int(config, section, 'snap_interval', DEFAULT_interval)
-    next_interval = now + timedelta(minutes=interval)
+    delta_minutes = (last_date - now).total_seconds() * 60
+    if delta_minutes > interval:
+        # Regular snap
+        new_created = _create_snapsthot(section, SNAP_PREFIX, suffix, snapshots)
 
-    # Are we on a day boundary?
-    if next_interval.weekday() != now.weekday():
-        _create_snapsthot(section, DAILY_PREFIX, suffix, snapshots)
-        # Are we on a week boundary?
-        if now.weekday() == 0:
-            _create_snapsthot(section, WEEKLY_PREFIX, suffix, snapshots)
-        # Are we on a month boundary?
-        if now.day == 1:
-            _create_snapsthot(section, MONTHLY_PREFIX, suffix, snapshots)
+        # Are we on a day boundary?
+        if last_date.weekday() != now.weekday():
+            _create_snapsthot(section, DAILY_PREFIX, suffix, snapshots)
+            # Are we on a week boundary?
+            if now.weekday() == 0:
+                _create_snapsthot(section, WEEKLY_PREFIX, suffix, snapshots)
+            # Are we on a month boundary?
+            if now.day == 1:
+                _create_snapsthot(section, MONTHLY_PREFIX, suffix, snapshots)
+    else:
+        new_created = False
 
     snapshots.sort(reverse=True)
     return (new_created, snapshots)
