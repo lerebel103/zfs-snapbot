@@ -9,6 +9,8 @@ import argparse
 import ConfigParser
 import sys
 import smtplib
+import os.path
+import tempfile
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from syslog import syslog
@@ -48,7 +50,7 @@ def main():
 
     # Check when last snapshot was made, create new one if interval exceeded
     now = datetime.now()
-    bad_pools = set()
+    bad_pools = dict()
     for section in config.sections():
         section = section.strip();
         if len(section):
@@ -59,12 +61,34 @@ def main():
                 do_section(section.strip(), config, now)
             else:
                 # Uh something bad
-                bad_pools.add(pool)
+                bad_pools[pool] = stdoutdata
 
-    #alert(config, bad_pools)
+    # Send alert if needed
+    if len(bad_pools) > 0:
+        _alert(now, config, bad_pools)
 
-def alert(config, bad_pools):
-    print "Bad pools: " + str(bad_pools)
+def _alert_sent(now, pools, check_file):
+    """ Touch a file in temp filesystem, so we know alert has been sent.
+    Clean up each day """
+    is_sent = os.path.isfile(check_file)
+
+    if len(pools) == 0 and is_sent:
+        os.remove(check_file)
+    elif is_sent:
+        is_sent = False
+        #with open(check_file, 'r') as f:
+        #    for line in f:
+
+    return is_sent
+
+def _alert(now, config, bad_pools):
+    tmp_dir = tempfile.gettempdir()
+    check_file = os.path.join(tmp_dir, 'zfs-snapbot.tmp')
+
+    if _alert_sent(now, bad_pools.keys(), check_file):
+        return
+
+    # Ok, send alert then
     s = smtplib.SMTP_SSL(
         _get_config_value(config, ' ', 'smtp_host', None),
         _get_config_value_int(config, ' ', 'smtp_port', 587),
@@ -77,22 +101,32 @@ def alert(config, bad_pools):
         password = _get_config_value(config, ' ', 'smtp_password', None),
     )
 
-
     from_email = _get_config_value(config, ' ', 'smtp_from', None)
     to_email = _get_config_value(config, ' ', 'smtp_to', None)
 
     msg = MIMEMultipart('alternative')
-    msg['Subject'] = "Alert"
+    msg['Subject'] = "[zfs-snapbot] ZPOOL Alert"
     msg['From'] = from_email
     msg['To'] = to_email
 
-    html = '<html><body><p>Hi, I have the following alerts for you!</p></body></html>'
+    html = """<html><body>
+        <p>Hi there,</p>
+        <p>I am afraid we have a problem:</p>"""
+    for pool_state in bad_pools.values():
+        html = '{}<pre>{}</pre>'.format(html, pool_state)
+    html = html + """<p>Good luck with it!<br>
+        -- zfs-snapbot.</p>
+        </body></html>"""
+
     part2 = MIMEText(html, 'html')
-
     msg.attach(part2)
-
     s.sendmail(from_email, to_email, msg.as_string())
     s.quit()
+
+    # Great mark check file
+    with open(check_file, 'w') as f:
+        for pool in bad_pools.keys():
+            f.write(pool + '\n')
 
 def _get_config_value(config, section, key, default):
     if config.has_option(section, key):
@@ -105,7 +139,8 @@ def _get_config_value_int(config, section, key, default):
 
 def do_section(section, config, now):
     interval = _get_config_value_int(config, section, 'snap_interval', DEFAULT_interval)
-    if now.minute % interval == 0:
+    minutes = int((now - datetime(1970, 1, 1)).total_seconds() / 60)
+    if minutes % interval == 0:
         # Create new snapshots
         suffix = now.strftime(DATE_FORMAT)
         (new_created, snapshots) = snapshot(config, section, suffix, now)

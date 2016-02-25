@@ -20,5 +20,10 @@
   <key>RunAtLoad</key>
   <true/>
 
+  <key>StandardOutPath</key>
+  <string>/var/log/zfs-snapshot.out</string>
+  <key>StandardErrorPath</key>
+  <string>/var/log/zfs-snapshot.err</string>
+
 </dict>
 </plist>
