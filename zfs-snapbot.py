@@ -64,10 +64,9 @@ def main():
                 bad_pools[pool] = stdoutdata
 
     # Send alert if needed
-    if len(bad_pools) > 0:
-        _alert(now, config, bad_pools)
+    _alert(now, config, bad_pools)
 
-def _alert_sent(now, pools, check_file):
+def _can_send_alert(now, pools, check_file):
     """ Touch a file in temp filesystem, so we know alert has been sent.
     Clean up each day """
     is_sent = os.path.isfile(check_file)
@@ -75,17 +74,18 @@ def _alert_sent(now, pools, check_file):
     if len(pools) == 0 and is_sent:
         os.remove(check_file)
     elif is_sent:
-        is_sent = False
+        pass
+        #is_sent = False
         #with open(check_file, 'r') as f:
         #    for line in f:
 
-    return is_sent
+    return not is_sent
 
 def _alert(now, config, bad_pools):
     tmp_dir = tempfile.gettempdir()
     check_file = os.path.join(tmp_dir, 'zfs-snapbot.tmp')
 
-    if _alert_sent(now, bad_pools.keys(), check_file):
+    if not _can_send_alert(now, bad_pools.keys(), check_file):
         return
 
     # Ok, send alert then
