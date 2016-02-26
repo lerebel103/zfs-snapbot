@@ -166,20 +166,20 @@ def snapshot(config, section, suffix, now):
         datestr = matching[0].replace('{}@{}'.format(section, SNAP_PREFIX), '')
         last_date = datetime.strptime(datestr, DATE_FORMAT)
 
-    delta_minutes = (last_date - now).total_seconds() * 60
+    delta_minutes = (now - last_date).total_seconds() * 60
     if delta_minutes > interval:
         # Regular snap
         new_created = _create_snapsthot(section, SNAP_PREFIX, suffix, snapshots)
 
-        # Are we on a day boundary?
-        if last_date.weekday() != now.weekday():
-            _create_snapsthot(section, DAILY_PREFIX, suffix, snapshots)
-            # Are we on a week boundary?
-            if now.weekday() == 0:
-                _create_snapsthot(section, WEEKLY_PREFIX, suffix, snapshots)
-            # Are we on a month boundary?
-            if now.day == 1:
-                _create_snapsthot(section, MONTHLY_PREFIX, suffix, snapshots)
+    # Are we on a day boundary?
+    if last_date.weekday() != now.weekday():
+        _create_snapsthot(section, DAILY_PREFIX, suffix, snapshots)
+        # Are we on a week boundary?
+        if now.weekday() == 0:
+            _create_snapsthot(section, WEEKLY_PREFIX, suffix, snapshots)
+        # Are we on a month boundary?
+        if now.day == 1:
+            _create_snapsthot(section, MONTHLY_PREFIX, suffix, snapshots)
     else:
         new_created = False
 
